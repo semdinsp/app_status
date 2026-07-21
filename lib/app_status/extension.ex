@@ -16,7 +16,7 @@ defmodule AppStatus.Extension do
         @impl true
         def extra_metrics do
           %{
-            db_pool: MyApp.Repo.checked_out_stats(),
+            db_pool_checked_out: MyApp.Repo.checked_out_count(),
             ibkr_connected: MyApp.IBKR.connected?()
           }
         end
@@ -25,6 +25,14 @@ defmodule AppStatus.Extension do
   `extra_metrics/0` must return a flat, JSON-encodable map. Keep keys
   namespaced (e.g. `:ibkr_connected` not `:connected`) since they get
   merged into the top-level report and flattened for Prometheus export.
+
+  Keep it flat, not nested: `AppStatus.PrometheusFormatter` only turns
+  numbers and booleans into Prometheus gauges. A nested map value (e.g.
+  `db_pool: %{pool_size: 10, up?: true}`) still shows up fine in the
+  JSON `/status` report, but is silently skipped — no error — when
+  rendering `/status/metrics`, since it isn't a number or boolean itself.
+  Flatten it instead (`db_pool_size: 10, db_pool_up: true`) if you want
+  it queryable in Prometheus/Grafana.
 
   ### Boot-time ordering
 

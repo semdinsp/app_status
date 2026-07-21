@@ -130,6 +130,29 @@ exported to `/status/metrics` too (booleans become 1/0, Prometheus
 convention for up/down values). String values show up in the JSON
 report but are skipped in the Prometheus export.
 
+**Nested maps are silently dropped from `/status/metrics`, with no
+error.** `AppStatus.PrometheusFormatter` only knows how to turn
+numbers/booleans into gauges — anything else (including a nested map)
+just isn't emitted as a metric line. It still shows up fine in the JSON
+`/status` report, so this is easy to miss. For example:
+
+```elixir
+def extra_metrics do
+  %{
+    # Nested map — visible in JSON /status, but produces zero lines in
+    # /status/metrics:
+    db_pool: %{pool_size: 10, up?: true},
+
+    # Flat keys — each becomes its own Prometheus gauge:
+    db_pool_size: 10,
+    db_pool_up: true
+  }
+end
+```
+
+If you want a value queryable in Grafana, flatten it into its own
+top-level key rather than nesting it.
+
 ### Boot-time safety
 
 `app_status` starts as its own OTP application, independently of the
