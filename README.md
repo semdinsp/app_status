@@ -23,7 +23,7 @@ Reports:
    # mix.exs
    def deps do
      [
-       {:app_status, git: "https://github.com/you/app_status.git", tag: "v0.1.0"}
+       {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.0"}
        # ...
      ]
    end
@@ -57,6 +57,18 @@ Reports:
 That's it — `mix deps.get && mix compile` and OTP will auto-start
 `AppStatus.Application` (and its Collector) as part of your app's
 supervision tree, no changes to your own `application.ex` needed.
+
+This gives you `GET /status` (pretty JSON) and `GET /status/metrics`
+(Prometheus text — point a scraper at it whenever you set up Grafana, no
+code changes needed). The Collector GenServer auto-starts via OTP's
+dependency mechanism and refreshes the snapshot every 5s so scraping
+doesn't hammer `:erlang.memory/0` on every hit. App-specific stuff (DB
+pool, IBKR connection state) plugs in via the `AppStatus.Extension`
+behaviour without touching this repo — see below.
+
+> **Note:** `v0.1.0` isn't tagged in this repo yet. Either push a tag before
+> pinning host apps to it, or point host apps at a commit SHA / branch until
+> a release is cut.
 
 ## Adding app-specific metrics
 
