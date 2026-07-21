@@ -26,7 +26,7 @@ the host app's repo (e.g. `trading_hub`, `trading_system`):
 Add the app_status shared library to this app so it gets a standard
 /status and /status/metrics endpoint:
 
-1. Add {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.1"}
+1. Add {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.2"}
    to deps() in mix.exs, then run mix deps.get.
 2. In config/config.exs, add:
      config :app_status,
@@ -57,7 +57,7 @@ Manual steps, if you'd rather do it by hand:
    # mix.exs
    def deps do
      [
-       {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.1"}
+       {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.2"}
        # ...
      ]
    end
@@ -172,6 +172,15 @@ can never crash the collector:
   aborted after 2s and reported as a timeout, instead of blocking the
   collector's refresh cycle forever.
 
+In both cases the failure detail (exception, stack trace, or exit
+reason) is logged locally via `Logger.error/1` — `/status` only ever
+shows a generic `"<Module>.extra_metrics/0 failed — see application
+logs"` string, never the raw error. This is deliberate: `/status` is
+normally unauthenticated (see "Security" below), so a raw stack trace
+or GenServer exit reason could otherwise leak internal file paths,
+module names, or call arguments to anyone who can reach the endpoint.
+Check your own app's logs to debug an `extension_error`.
+
 Still, for a cleaner report during boot, consider defensively checking
 `Process.whereis/1` before calling into your own GenServers:
 
@@ -188,6 +197,115 @@ end
 This is a nicety for a cleaner report, not a substitute for the
 library-side fix above — `call_configured/0` will never crash the host
 app regardless of what your extension does.
+
+## Security
+
+`/status` and `/status/metrics` are designed to be mounted **without
+authentication**, so scrapers (Prometheus, uptime checks) can hit them
+without credentials. That's a deliberate tradeoff, not an oversight —
+but it means anyone who can reach the host app's HTTP port can:
+
+- See the app's real name/version, BEAM node name (e.g.
+  `trading_hub@some-host.local`), hostname, port, uptime, and memory/process
+  stats — useful recon for timing an attack around a restart/deploy.
+- See whatever a host app's `AppStatus.Extension` exposes (e.g. whether
+  a DB or an external connection is currently up) — don't put anything
+  in `extra_metrics/0` you wouldn't want an unauthenticated caller to
+  see (no raw credentials, connection strings, tokens, or PII; booleans
+  and small numeric health indicators are the intended use case).
+- As of `v0.1.1`, extension failures are sanitized before they reach
+  `/status` (see "Boot-time safety" above) — a raised error or a dead
+  `GenServer.call` no longer leaks a stack trace or exit reason into the
+  public report, only a generic message pointing at your logs.
+
+If a host app is reachable from the public internet (not just an
+internal network/VPN), restrict access to `/status*` at the network
+layer — e.g. an IP allowlist or basic auth at the load balancer/reverse
+proxy in front of it, scoped to your Prometheus scraper and your own
+IPs — rather than relying on anything in this library, which has no
+built-in access control by design.
+
+### Production hardening checklist
+
+Pick whichever of these fit your deployment; they're not mutually
+exclusive. From least to most work:
+
+1. **Network-level restriction (recommended first line of defense).**
+   Don't expose `/status*` to the public internet at all if you can
+   avoid it:
+   - **Fly.io**: put the scraper (Prometheus/Grafana Agent) on the same
+     private network (`.internal` / 6PN) as the app and don't route
+     `/status*` through the public `fly-proxy` — e.g. run Prometheus as
+     its own Fly app in the same org and scrape over `appname.internal`,
+     or restrict the public path at your edge/CDN config.
+   - **Behind nginx/Caddy/an ALB**: allowlist `/status*` to your
+     scraper's IP(s) and your office/VPN CIDR; deny everyone else with a
+     403 before the request ever reaches the BEAM.
+
+2. **Shared-secret header check, enforced in the host app's router**
+   (simple, no extra infra). Wrap the `forward` in a plug that checks a
+   header before dispatching to `AppStatus.Plug`:
+
+   ```elixir
+   # lib/my_app_web/router.ex
+   pipeline :status_auth do
+     plug :require_status_token
+   end
+
+   scope "/status" do
+     pipe_through :status_auth
+     forward "/", AppStatus.Plug
+   end
+
+   defp require_status_token(conn, _opts) do
+     expected = Application.fetch_env!(:my_app, :status_token)
+
+     case Plug.Conn.get_req_header(conn, "x-status-token") do
+       [^expected] ->
+         conn
+
+       _ ->
+         conn
+         |> Plug.Conn.send_resp(401, "unauthorized")
+         |> Plug.Conn.halt()
+     end
+   end
+   ```
+
+   Set `config :my_app, status_token: System.fetch_env!("STATUS_TOKEN")`
+   at runtime (`config/runtime.exs`), and configure your Prometheus
+   scrape job / uptime checker to send that header. Use
+   `Plug.Crypto.secure_compare/2` instead of `==`/pattern-matching if
+   you want constant-time comparison against timing attacks.
+
+3. **Basic auth**, if you'd rather not manage a custom header —
+   `Plug.BasicAuth` ships with `:plug` itself, already a dependency of
+   this library, so no extra deps are needed. It's a function plug, not
+   a module plug, and only takes plain string credentials (read them
+   from the environment at runtime, don't hardcode them):
+
+   ```elixir
+   # lib/my_app_web/router.ex
+   scope "/status" do
+     plug :status_basic_auth
+     forward "/", AppStatus.Plug
+   end
+
+   defp status_basic_auth(conn, _opts) do
+     Plug.BasicAuth.basic_auth(conn,
+       username: System.fetch_env!("STATUS_USERNAME"),
+       password: System.fetch_env!("STATUS_PASSWORD")
+     )
+   end
+   ```
+
+General Elixir/Phoenix production security reminders, beyond just this
+endpoint: run behind TLS (Fly.io/most PaaS terminate this for you, but
+verify `force_ssl` is set in your Endpoint config for anything
+internet-facing), never commit secrets to `config/config.exs` — use
+`config/runtime.exs` + env vars for anything sensitive, and keep
+`mix deps.audit`/`mix hex.audit` in CI to catch known-vulnerable
+dependencies.
 
 ## Wiring up Grafana
 
@@ -221,6 +339,23 @@ There's no standalone server in this repo — it's meant to be mounted
 inside a host Phoenix app via `forward "/status", AppStatus.Plug`.
 
 ## Changelog
+
+### v0.1.2
+
+- Security: `AppStatus.Extension.call_configured/0` no longer returns
+  the raw exception message, stack trace, or `GenServer` exit reason in
+  the public `extension_error` field. `/status` is normally mounted
+  unauthenticated, so a raw stack trace or exit reason (which can embed
+  internal file paths, module/function names, or call arguments) was
+  being exposed to anyone who could reach the endpoint. The full detail
+  is now logged locally via `Logger.error/1`; `/status` only shows a
+  generic `"<Module>.extra_metrics/0 failed — see application logs"`
+  message. See "Security" and "Boot-time safety" above.
+- Docs: added a "Security" section covering the unauthenticated-by-design
+  tradeoff of `/status*` and a production hardening checklist (network
+  restriction, shared-secret header, `Plug.BasicAuth`), and documented
+  that nested `extra_metrics/0` values are silently dropped from
+  `/status/metrics` (numbers/booleans only).
 
 ### v0.1.1
 

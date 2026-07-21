@@ -60,7 +60,21 @@ defmodule AppStatus.Extension do
 
   This is guidance for a cleaner report, not a substitute for the
   library-side fix — `call_configured/0` will never crash regardless.
+
+  ### Error reporting is intentionally sanitized
+
+  `/status` is normally mounted unauthenticated (see `AppStatus.Plug`),
+  so if `extra_metrics/0` raises or exits, `call_configured/0` logs the
+  full exception and stack trace via `Logger.error/1` (visible in your
+  own logs/log aggregator) but only ever returns a short, generic
+  `extension_error` string in the public report — never the raw
+  exception message, argument values, or stack trace, since those can
+  contain internal file paths, module/function names, or fragments of
+  the data your extension was working with. Check your logs, not
+  `/status`, to debug an `extension_error`.
   """
+
+  require Logger
 
   @callback extra_metrics() :: map()
 
@@ -84,6 +98,12 @@ defmodule AppStatus.Extension do
   #     caught in-process.
   #   - a hung call (e.g. GenServer.call to a slow process) can't block
   #     the collector's refresh cycle forever; it's bounded by a timeout.
+  #
+  # Failure details (exception, stack trace, exit reason) are logged
+  # locally but never returned in the report itself — /status is
+  # normally unauthenticated, so a raw stack trace or exit reason (which
+  # can embed call arguments) would leak internal implementation details
+  # to anyone who can reach the endpoint.
   defp safe_call(module) do
     task =
       Task.async(fn ->
@@ -101,13 +121,18 @@ defmodule AppStatus.Extension do
         metrics
 
       {:ok, {:ok, other}} ->
-        %{extension_error: "extra_metrics/0 returned non-map: #{inspect(other)}"}
+        log_and_sanitize(module, "extra_metrics/0 returned a non-map value: #{inspect(other)}")
 
       {:ok, {:error, formatted}} ->
-        %{extension_error: formatted}
+        log_and_sanitize(module, formatted)
 
       nil ->
-        %{extension_error: "extra_metrics/0 timed out after #{@call_timeout_ms}ms"}
+        log_and_sanitize(module, "extra_metrics/0 timed out after #{@call_timeout_ms}ms")
     end
+  end
+
+  defp log_and_sanitize(module, detail) do
+    Logger.error("AppStatus.Extension: #{inspect(module)}.extra_metrics/0 failed: #{detail}")
+    %{extension_error: "#{inspect(module)}.extra_metrics/0 failed — see application logs"}
   end
 end

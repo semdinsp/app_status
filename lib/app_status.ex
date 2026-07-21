@@ -5,7 +5,7 @@ defmodule AppStatus do
   Quick start in a host app:
 
       # mix.exs
-      {:app_status, git: "https://github.com/you/app_status.git", tag: "v0.1.0"}
+      {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.1"}
 
       # config/config.exs
       config :app_status,
