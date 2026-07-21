@@ -71,9 +71,6 @@ Host apps add this as a git dependency (repo: `https://github.com/semdinsp/app_s
 {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.0"}
 ```
 
-No tag has been pushed yet — pin host apps to a commit SHA or branch until
-`v0.1.0` (or later) is actually tagged, then move them to the tag.
-
 Then configure it via their own `config/config.exs`:
 
 ```elixir

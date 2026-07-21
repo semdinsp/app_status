@@ -66,10 +66,6 @@ doesn't hammer `:erlang.memory/0` on every hit. App-specific stuff (DB
 pool, IBKR connection state) plugs in via the `AppStatus.Extension`
 behaviour without touching this repo — see below.
 
-> **Note:** `v0.1.0` isn't tagged in this repo yet. Either push a tag before
-> pinning host apps to it, or point host apps at a commit SHA / branch until
-> a release is cut.
-
 ## Adding app-specific metrics
 
 Implement the `AppStatus.Extension` behaviour for things this shared
