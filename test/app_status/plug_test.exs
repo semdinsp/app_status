@@ -84,5 +84,20 @@ defmodule AppStatus.PlugTest do
       assert conn.private[:plug_logger_log] == false
       assert Logger.get_process_level(self()) == :warning
     end
+
+    test "AppStatus.Plug.Filter suppresses Endpoint/Router logging on /status paths when throttled" do
+      Application.put_env(:app_status, :access_log_interval, false)
+      filter_opts = AppStatus.Plug.Filter.init([])
+
+      conn = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      assert conn.private[:plug_logger_log] == false
+      assert Logger.get_process_level(self()) == :warning
+
+      # Non-status path should pass through untouched
+      Logger.put_process_level(self(), :info)
+      conn_other = conn(:get, "/api/users") |> AppStatus.Plug.Filter.call(filter_opts)
+      assert conn_other.private[:plug_logger_log] == nil
+      assert Logger.get_process_level(self()) == :info
+    end
   end
 end
