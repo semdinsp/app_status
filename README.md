@@ -26,7 +26,7 @@ the host app's repo (e.g. `trading_hub`, `trading_system`):
 Add the app_status shared library to this app so it gets a standard
 /status and /status/metrics endpoint:
 
-1. Add {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.2"}
+1. Add {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.3"}
    to deps() in mix.exs, then run mix deps.get.
 2. In config/config.exs, add:
      config :app_status,
@@ -57,7 +57,7 @@ Manual steps, if you'd rather do it by hand:
    # mix.exs
    def deps do
      [
-       {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.2"}
+       {:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.3"}
        # ...
      ]
    end
@@ -70,7 +70,8 @@ Manual steps, if you'd rather do it by hand:
    # config/config.exs
    config :app_status,
      app_name: :my_app,
-     endpoint: MyAppWeb.Endpoint
+     endpoint: MyAppWeb.Endpoint,
+     access_log_interval: 60 # Seconds between access logs (default: 60s / 1 min). Use 0 for every access, or false to disable logs.
    ```
 
 3. Mount it in your router:

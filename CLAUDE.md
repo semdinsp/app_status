@@ -68,7 +68,7 @@ Host apps add this as a git dependency (repo: `https://github.com/semdinsp/app_s
 
 ```elixir
 # mix.exs
-{:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.0"}
+{:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.3"}
 ```
 
 Then configure it via their own `config/config.exs`:
@@ -77,6 +77,7 @@ Then configure it via their own `config/config.exs`:
 config :app_status,
   app_name: :my_app,
   endpoint: MyAppWeb.Endpoint,
+  access_log_interval: 60,           # seconds (default: 60, use 0 for all, false for none)
   extension: MyApp.StatusExtension  # optional
 ```
 

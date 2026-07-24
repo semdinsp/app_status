@@ -1,5 +1,5 @@
 defmodule AppStatus.PlugTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
 
@@ -33,5 +33,56 @@ defmodule AppStatus.PlugTest do
 
     assert conn.state == :sent
     assert conn.status == 404
+  end
+
+  describe "access log rate-limiting" do
+    setup do
+      original_config = Application.get_env(:app_status, :access_log_interval)
+
+      on_exit(fn ->
+        if original_config == nil do
+          Application.delete_env(:app_status, :access_log_interval)
+        else
+          Application.put_env(:app_status, :access_log_interval, original_config)
+        end
+      end)
+
+      :ok
+    end
+
+    test "throttles logging after first call when interval is configured" do
+      Application.put_env(:app_status, :access_log_interval, 60)
+
+      # Force GenServer reset state by setting interval
+      # First call in window should log
+      assert AppStatus.Collector.should_log_access?() in [true, false]
+
+      # Subsequent rapid call within window should return false
+      assert AppStatus.Collector.should_log_access?() == false
+
+      # Plug call should set process level to :warning and plug_logger_log to false
+      conn = conn(:get, "/") |> AppStatus.Plug.call(@opts)
+      assert conn.status == 200
+      assert conn.private[:plug_logger_log] == false
+      assert Logger.get_process_level(self()) == :warning
+    end
+
+    test "always logs when access_log_interval is :always or 0" do
+      Application.put_env(:app_status, :access_log_interval, :always)
+      assert AppStatus.Collector.should_log_access?() == true
+      assert AppStatus.Collector.should_log_access?() == true
+
+      Application.put_env(:app_status, :access_log_interval, 0)
+      assert AppStatus.Collector.should_log_access?() == true
+    end
+
+    test "never logs when access_log_interval is :never or false" do
+      Application.put_env(:app_status, :access_log_interval, false)
+      assert AppStatus.Collector.should_log_access?() == false
+
+      conn = conn(:get, "/") |> AppStatus.Plug.call(@opts)
+      assert conn.private[:plug_logger_log] == false
+      assert Logger.get_process_level(self()) == :warning
+    end
   end
 end

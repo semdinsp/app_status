@@ -16,8 +16,18 @@ defmodule AppStatus.Plug do
   """
   use Plug.Router
 
-  plug :match
-  plug :dispatch
+  plug(:maybe_suppress_logging)
+  plug(:match)
+  plug(:dispatch)
+
+  defp maybe_suppress_logging(conn, _opts) do
+    if AppStatus.Collector.should_log_access?() do
+      conn
+    else
+      Logger.put_process_level(self(), :warning)
+      Plug.Conn.put_private(conn, :plug_logger_log, false)
+    end
+  end
 
   get "/" do
     report = AppStatus.Collector.get()
