@@ -34,6 +34,14 @@ defmodule AppStatus.Collector do
     :exit, _ -> AppStatus.Report.build(DateTime.utc_now() |> DateTime.to_iso8601())
   end
 
+  # TODO: strip out the ETS-based rate-limit state below and redo this.
+  # A raw public named ETS table with manual whereis/new/rescue bootstrapping
+  # is more machinery than this needs, and should_log_access?/0 being a
+  # stateful call with a side effect already caused one double-consumption
+  # bug (see AppStatus.Plug.Filter / AppStatus.Plug interaction). Consider
+  # tracking last-logged-at as GenServer state on AppStatus.Collector again,
+  # or another approach that doesn't require every caller to reason about
+  # call-order/side-effect sharing.
   @ets_table :app_status_access_log
 
   @doc """
