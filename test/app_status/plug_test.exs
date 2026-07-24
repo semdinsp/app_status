@@ -38,8 +38,11 @@ defmodule AppStatus.PlugTest do
   describe "access log rate-limiting" do
     setup do
       original_config = Application.get_env(:app_status, :access_log_interval)
+      AppStatus.Collector.reset_access_log_timer!()
 
       on_exit(fn ->
+        AppStatus.Collector.reset_access_log_timer!()
+
         if original_config == nil do
           Application.delete_env(:app_status, :access_log_interval)
         else
@@ -53,9 +56,8 @@ defmodule AppStatus.PlugTest do
     test "throttles logging after first call when interval is configured" do
       Application.put_env(:app_status, :access_log_interval, 60)
 
-      # Force GenServer reset state by setting interval
       # First call in window should log
-      assert AppStatus.Collector.should_log_access?() in [true, false]
+      assert AppStatus.Collector.should_log_access?() == true
 
       # Subsequent rapid call within window should return false
       assert AppStatus.Collector.should_log_access?() == false
@@ -83,6 +85,38 @@ defmodule AppStatus.PlugTest do
       conn = conn(:get, "/") |> AppStatus.Plug.call(@opts)
       assert conn.private[:plug_logger_log] == false
       assert Logger.get_process_level(self()) == :warning
+    end
+
+    test "AppStatus.Plug.Filter suppresses Endpoint/Router logging on /status paths when throttled" do
+      Application.put_env(:app_status, :access_log_interval, false)
+      filter_opts = AppStatus.Plug.Filter.init([])
+
+      conn = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      assert conn.private[:plug_logger_log] == false
+      assert Logger.get_process_level(self()) == :warning
+
+      # Non-status path should pass through untouched
+      Logger.put_process_level(self(), :info)
+      conn_other = conn(:get, "/api/users") |> AppStatus.Plug.Filter.call(filter_opts)
+      assert conn_other.private[:plug_logger_log] == nil
+      assert Logger.get_process_level(self()) == :info
+    end
+
+    test "Filter + forwarded AppStatus.Plug agree on the same request instead of double-consuming the throttle window" do
+      Application.put_env(:app_status, :access_log_interval, 60)
+      filter_opts = AppStatus.Plug.Filter.init([])
+
+      # First request in a fresh window: both the Filter (endpoint.ex) and
+      # AppStatus.Plug's own suppression (reached via router forward) see the
+      # same conn and must agree this one logs.
+      conn = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      conn = AppStatus.Plug.call(conn, @opts)
+      assert conn.private[:plug_logger_log] != false
+
+      # Second request within the window: both must agree this one is suppressed.
+      conn2 = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      conn2 = AppStatus.Plug.call(conn2, @opts)
+      assert conn2.private[:plug_logger_log] == false
     end
   end
 end

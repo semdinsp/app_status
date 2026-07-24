@@ -34,14 +34,53 @@ defmodule AppStatus.Collector do
     :exit, _ -> AppStatus.Report.build(DateTime.utc_now() |> DateTime.to_iso8601())
   end
 
+  @ets_table :app_status_access_log
+
   @doc """
   Checks if an access log should be emitted for status endpoints based on `access_log_interval`.
   Returns `true` if this access should log, `false` if it should be suppressed.
   """
   def should_log_access? do
-    GenServer.call(__MODULE__, :check_access_log)
-  catch
-    :exit, _ -> true
+    case access_log_interval() do
+      :always ->
+        true
+
+      :never ->
+        false
+
+      seconds when is_integer(seconds) and seconds > 0 ->
+        now = System.monotonic_time(:second)
+        table = ensure_ets_table()
+
+        case :ets.lookup(table, :last_access_log_at) do
+          [{:last_access_log_at, last_logged}] when now - last_logged < seconds ->
+            false
+
+          _ ->
+            :ets.insert(table, {:last_access_log_at, now})
+            true
+        end
+    end
+  end
+
+  def reset_access_log_timer! do
+    table = ensure_ets_table()
+    :ets.delete(table, :last_access_log_at)
+    :ok
+  end
+
+  defp ensure_ets_table do
+    case :ets.whereis(@ets_table) do
+      :undefined ->
+        try do
+          :ets.new(@ets_table, [:set, :public, :named_table, read_concurrency: true])
+        rescue
+          ArgumentError -> @ets_table
+        end
+
+      _tid ->
+        @ets_table
+    end
   end
 
   # --- Server ---------------------------------------------------------
@@ -50,8 +89,7 @@ defmodule AppStatus.Collector do
   def init(_opts) do
     state = %{
       started_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-      report: nil,
-      last_access_log_at: nil
+      report: nil
     }
 
     # Build the first snapshot immediately, then refresh on a timer.
@@ -73,28 +111,6 @@ defmodule AppStatus.Collector do
 
   def handle_call(:get, _from, state) do
     {:reply, state.report, state}
-  end
-
-  def handle_call(:check_access_log, _from, state) do
-    interval = access_log_interval()
-    now = System.monotonic_time(:second)
-
-    case interval do
-      :always ->
-        {:reply, true, state}
-
-      :never ->
-        {:reply, false, state}
-
-      seconds when is_integer(seconds) and seconds > 0 ->
-        last_logged = state.last_access_log_at
-
-        if is_nil(last_logged) or now - last_logged >= seconds do
-          {:reply, true, %{state | last_access_log_at: now}}
-        else
-          {:reply, false, state}
-        end
-    end
   end
 
   @impl true

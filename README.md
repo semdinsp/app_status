@@ -34,7 +34,8 @@ Add the app_status shared library to this app so it gets a standard
        endpoint: THIS_APP_WEB.Endpoint
    (infer the correct OTP app name and Endpoint module from mix.exs / the
    existing config rather than guessing generic names.)
-3. In the router (lib/*_web/router.ex), add:
+3. In endpoint (lib/*_web/endpoint.ex), add `plug AppStatus.Plug.Filter` before `plug Plug.Telemetry`.
+   In router (lib/*_web/router.ex), add:
      forward "/status", AppStatus.Plug
    Mount it outside any :browser/:api pipeline that would force HTML or
    add unwanted plugs (CSRF, auth, etc.) — it should be reachable
@@ -74,9 +75,13 @@ Manual steps, if you'd rather do it by hand:
      access_log_interval: 60 # Seconds between access logs (default: 60s / 1 min). Use 0 for every access, or false to disable logs.
    ```
 
-3. Mount it in your router:
+3. Mount it in your router (and optionally add the log filter to your endpoint):
 
    ```elixir
+   # lib/my_app_web/endpoint.ex (optional: suppresses opening [info] GET /status & [debug] Processing logs when throttled)
+   plug AppStatus.Plug.Filter
+   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+
    # lib/my_app_web/router.ex
    forward "/status", AppStatus.Plug
    ```
