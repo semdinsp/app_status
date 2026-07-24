@@ -18,9 +18,16 @@ defmodule AppStatus.Plug.Filter do
 
   @impl true
   def call(%Plug.Conn{request_path: path} = conn, _opts) do
-    if status_path?(path) and not AppStatus.Collector.should_log_access?() do
-      Logger.put_process_level(self(), :warning)
-      Plug.Conn.put_private(conn, :plug_logger_log, false)
+    if status_path?(path) do
+      if AppStatus.Collector.should_log_access?() do
+        Plug.Conn.put_private(conn, :app_status_log_access?, true)
+      else
+        Logger.put_process_level(self(), :warning)
+
+        conn
+        |> Plug.Conn.put_private(:app_status_log_access?, false)
+        |> Plug.Conn.put_private(:plug_logger_log, false)
+      end
     else
       conn
     end

@@ -101,5 +101,22 @@ defmodule AppStatus.PlugTest do
       assert conn_other.private[:plug_logger_log] == nil
       assert Logger.get_process_level(self()) == :info
     end
+
+    test "Filter + forwarded AppStatus.Plug agree on the same request instead of double-consuming the throttle window" do
+      Application.put_env(:app_status, :access_log_interval, 60)
+      filter_opts = AppStatus.Plug.Filter.init([])
+
+      # First request in a fresh window: both the Filter (endpoint.ex) and
+      # AppStatus.Plug's own suppression (reached via router forward) see the
+      # same conn and must agree this one logs.
+      conn = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      conn = AppStatus.Plug.call(conn, @opts)
+      assert conn.private[:plug_logger_log] != false
+
+      # Second request within the window: both must agree this one is suppressed.
+      conn2 = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
+      conn2 = AppStatus.Plug.call(conn2, @opts)
+      assert conn2.private[:plug_logger_log] == false
+    end
   end
 end

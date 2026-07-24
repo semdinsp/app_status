@@ -21,12 +21,28 @@ defmodule AppStatus.Plug do
   plug(:dispatch)
 
   defp maybe_suppress_logging(conn, _opts) do
+    # AppStatus.Plug.Filter, when mounted upstream in endpoint.ex, already made
+    # this decision for the request. Reuse it instead of calling
+    # should_log_access?/0 again, since each call advances the rate-limit
+    # window as a side effect.
+    case conn.private[:app_status_log_access?] do
+      nil -> decide_and_maybe_suppress(conn)
+      true -> conn
+      false -> suppress(conn)
+    end
+  end
+
+  defp decide_and_maybe_suppress(conn) do
     if AppStatus.Collector.should_log_access?() do
       conn
     else
-      Logger.put_process_level(self(), :warning)
-      Plug.Conn.put_private(conn, :plug_logger_log, false)
+      suppress(conn)
     end
+  end
+
+  defp suppress(conn) do
+    Logger.put_process_level(self(), :warning)
+    Plug.Conn.put_private(conn, :plug_logger_log, false)
   end
 
   get "/" do
