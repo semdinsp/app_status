@@ -38,8 +38,11 @@ defmodule AppStatus.PlugTest do
   describe "access log rate-limiting" do
     setup do
       original_config = Application.get_env(:app_status, :access_log_interval)
+      AppStatus.Collector.reset_access_log_timer!()
 
       on_exit(fn ->
+        AppStatus.Collector.reset_access_log_timer!()
+
         if original_config == nil do
           Application.delete_env(:app_status, :access_log_interval)
         else
@@ -53,9 +56,8 @@ defmodule AppStatus.PlugTest do
     test "throttles logging after first call when interval is configured" do
       Application.put_env(:app_status, :access_log_interval, 60)
 
-      # Force GenServer reset state by setting interval
       # First call in window should log
-      assert AppStatus.Collector.should_log_access?() in [true, false]
+      assert AppStatus.Collector.should_log_access?() == true
 
       # Subsequent rapid call within window should return false
       assert AppStatus.Collector.should_log_access?() == false
