@@ -38,10 +38,17 @@ defmodule AppStatus.PlugTest do
   describe "access log rate-limiting" do
     setup do
       original_config = Application.get_env(:app_status, :access_log_interval)
+      original_level = Logger.level()
+
+      # should_log_access?/0 always logs at Logger level :debug (so a debug
+      # session is never silenced) — pin to :info so these tests exercise
+      # the actual throttling logic instead of that bypass.
+      Logger.configure(level: :info)
       AppStatus.Collector.reset_access_log_timer!()
 
       on_exit(fn ->
         AppStatus.Collector.reset_access_log_timer!()
+        Logger.configure(level: original_level)
 
         if original_config == nil do
           Application.delete_env(:app_status, :access_log_interval)
@@ -117,6 +124,14 @@ defmodule AppStatus.PlugTest do
       conn2 = conn(:get, "/status") |> AppStatus.Plug.Filter.call(filter_opts)
       conn2 = AppStatus.Plug.call(conn2, @opts)
       assert conn2.private[:plug_logger_log] == false
+    end
+
+    test "never suppresses when Logger level is :debug, regardless of interval" do
+      Application.put_env(:app_status, :access_log_interval, 60)
+      Logger.configure(level: :debug)
+
+      assert AppStatus.Collector.should_log_access?() == true
+      assert AppStatus.Collector.should_log_access?() == true
     end
   end
 end

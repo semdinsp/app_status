@@ -75,6 +75,10 @@ Manual steps, if you'd rather do it by hand:
      access_log_interval: 60 # Seconds between access logs (default: 60s / 1 min). Use 0 for every access, or false to disable logs.
    ```
 
+   Throttling/suppression is skipped whenever the runtime `Logger` level is
+   `:debug` — so a debug session always sees every `/status` and
+   `/status/metrics` hit logged, regardless of `access_log_interval`.
+
 3. Mount it in your router (and optionally add the log filter to your endpoint):
 
    ```elixir

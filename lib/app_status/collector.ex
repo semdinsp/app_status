@@ -34,61 +34,35 @@ defmodule AppStatus.Collector do
     :exit, _ -> AppStatus.Report.build(DateTime.utc_now() |> DateTime.to_iso8601())
   end
 
-  # TODO: strip out the ETS-based rate-limit state below and redo this.
-  # A raw public named ETS table with manual whereis/new/rescue bootstrapping
-  # is more machinery than this needs, and should_log_access?/0 being a
-  # stateful call with a side effect already caused one double-consumption
-  # bug (see AppStatus.Plug.Filter / AppStatus.Plug interaction). Consider
-  # tracking last-logged-at as GenServer state on AppStatus.Collector again,
-  # or another approach that doesn't require every caller to reason about
-  # call-order/side-effect sharing.
-  @ets_table :app_status_access_log
-
   @doc """
   Checks if an access log should be emitted for status endpoints based on `access_log_interval`.
   Returns `true` if this access should log, `false` if it should be suppressed.
+
+  Always returns `true` when the runtime `Logger` level is `:debug`, so
+  suppression never hides status-endpoint logs from a debug session.
   """
   def should_log_access? do
-    case access_log_interval() do
-      :always ->
-        true
-
-      :never ->
-        false
-
-      seconds when is_integer(seconds) and seconds > 0 ->
-        now = System.monotonic_time(:second)
-        table = ensure_ets_table()
-
-        case :ets.lookup(table, :last_access_log_at) do
-          [{:last_access_log_at, last_logged}] when now - last_logged < seconds ->
-            false
-
-          _ ->
-            :ets.insert(table, {:last_access_log_at, now})
-            true
-        end
+    if Logger.level() == :debug do
+      true
+    else
+      case access_log_interval() do
+        :always -> true
+        :never -> false
+        seconds when is_integer(seconds) and seconds > 0 -> check_and_update_interval(seconds)
+      end
     end
   end
 
   def reset_access_log_timer! do
-    table = ensure_ets_table()
-    :ets.delete(table, :last_access_log_at)
-    :ok
+    GenServer.call(__MODULE__, :reset_access_log_timer)
+  catch
+    :exit, _ -> :ok
   end
 
-  defp ensure_ets_table do
-    case :ets.whereis(@ets_table) do
-      :undefined ->
-        try do
-          :ets.new(@ets_table, [:set, :public, :named_table, read_concurrency: true])
-        rescue
-          ArgumentError -> @ets_table
-        end
-
-      _tid ->
-        @ets_table
-    end
+  defp check_and_update_interval(seconds) do
+    GenServer.call(__MODULE__, {:check_access_log, seconds})
+  catch
+    :exit, _ -> true
   end
 
   # --- Server ---------------------------------------------------------
@@ -97,7 +71,8 @@ defmodule AppStatus.Collector do
   def init(_opts) do
     state = %{
       started_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-      report: nil
+      report: nil,
+      last_access_log_at: nil
     }
 
     # Build the first snapshot immediately, then refresh on a timer.
@@ -119,6 +94,22 @@ defmodule AppStatus.Collector do
 
   def handle_call(:get, _from, state) do
     {:reply, state.report, state}
+  end
+
+  def handle_call({:check_access_log, seconds}, _from, state) do
+    now = System.monotonic_time(:second)
+
+    case state.last_access_log_at do
+      last_logged when is_integer(last_logged) and now - last_logged < seconds ->
+        {:reply, false, state}
+
+      _ ->
+        {:reply, true, %{state | last_access_log_at: now}}
+    end
+  end
+
+  def handle_call(:reset_access_log_timer, _from, state) do
+    {:reply, :ok, %{state | last_access_log_at: nil}}
   end
 
   @impl true
