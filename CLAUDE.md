@@ -68,7 +68,7 @@ Host apps add this as a git dependency (repo: `https://github.com/semdinsp/app_s
 
 ```elixir
 # mix.exs
-{:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.3"}
+{:app_status, git: "https://github.com/semdinsp/app_status.git", tag: "v0.1.4"}
 ```
 
 Then configure it via their own `config/config.exs`:
